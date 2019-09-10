@@ -1,0 +1,21 @@
+{
+  "dexp": "exp",
+  "model": "glad",
+  "epoch": 50,
+  "demb": 400,
+  "dhid": 200,
+  "batch_size": 50,
+  "lr": 0.001,
+  "stop": "joint_goal",
+  "resume": null,
+  "nick": "default",
+  "seed": 42,
+  "test": false,
+  "gpu": 0,
+  "dropout": {
+    "emb": 0.2,
+    "local": 0.2,
+    "global": 0.2
+  },
+  "dout": "exp/tracker/default"
+}
