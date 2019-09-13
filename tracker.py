@@ -59,14 +59,15 @@ class Tracker(nn.Module):
         self.vocab = vocab
         self.emb_fixed = FixedEmbedding(len(vocab), ed, dropout=dropout)
 
-        self.domain_encoder = nn.Sequential(nn.Linear(ed, hd), nn.ReLU(), nn.Linear(hd, hd))
+        self.domain_encoder = nn.Sequential(nn.Linear(ed, hd), nn.Tanh(), nn.Linear(hd, hd))
         self.utt_encoder = RNNEncoder(ed, hd)
-        self.slot_encoder = nn.Sequential(nn.Linear(ed, hd), nn.ReLU(), nn.Linear(hd, hd))
+        self.slot_encoder = nn.Sequential(nn.Linear(ed, hd), nn.Tanh(), nn.Linear(hd, hd))
 
         self.du_attention = DotAttention(hd, 2 * hd, hd)
         self.domain_scorer = nn.Sequential(nn.Linear(3 * hd, hd), nn.Tanh(), nn.Linear(hd, 1))
 
         self.su_attention = DotAttention(hd, 2 * hd, hd)
+        self.utt_summer = Summer(2 * hd, hd)
         self.slot_scorer = nn.Sequential(nn.Linear(3 * hd, hd), nn.Tanh(), nn.Linear(hd, 2))
         self.span_value_scorer = nn.Sequential(nn.Linear(3 * hd, hd), nn.Tanh(), nn.Linear(hd, 2))
 
@@ -152,9 +153,9 @@ class Tracker(nn.Module):
             current_str_slots = self.ontology.domain_slots[prediction['domain']]
             current_slot_num = len(current_numeric_slots)
             current_slot_enc = all_slot_enc[predicted_domain]  # sn*hd
-            su_attentin = self.su_attention(current_slot_enc, utterance_enc)  # sn*2hd
-            tiled_domain_enc = predicted_domain_enc.unsqueeze(0).repeat(current_slot_num, 1)  # sn*hd
-            slot_logits = self.slot_scorer(torch.cat([su_attentin, tiled_domain_enc], dim=1))  # sn*2
+            utt_summer = self.utt_summer(utterance_enc)  # 2hd
+            tiled_utt_summer_enc = utt_summer.unsqueeze(0).repeat(current_slot_num, 1)  # sn*2hd
+            slot_logits = self.slot_scorer(torch.cat([current_slot_enc, tiled_utt_summer_enc], dim=1))  # sn*2
             slot_p = F.softmax(slot_logits, dim=1)  # sn*2
             if self.training:
                 slot_truth = np.zeros((current_slot_num, 2))  # not mentioned, mentioned
@@ -177,10 +178,10 @@ class Tracker(nn.Module):
                 loss += F.binary_cross_entropy(slot_p, slot_truth)/current_slot_num
                 not_mentioned_slot_index = slot_truth[:, 0] == 1
                 mentioned_slot_index = slot_truth[:, 1] == 1
-                mentioned_slot_su = su_attentin[mentioned_slot_index]  # msn*2hd
-                tiled_domain_enc = predicted_domain_enc.unsqueeze(0).repeat(mentioned_slot_num, 1)  # msn*hd
+                mentioned_slot_enc = current_slot_enc[mentioned_slot_index]  # msn*2hd
+                tiled_utt_summer_enc = utt_summer.unsqueeze(0).repeat(mentioned_slot_num, 1)  # msn*2hd
                 # msn*2
-                span_value_logits = self.span_value_scorer(torch.cat([mentioned_slot_su, tiled_domain_enc], dim=1))
+                span_value_logits = self.span_value_scorer(torch.cat([mentioned_slot_enc, tiled_utt_summer_enc], dim=1))
                 span_value_p = F.softmax(span_value_logits, dim=1)  # msn*2
                 loss += F.binary_cross_entropy(span_value_p, span_value_truth)/mentioned_slot_num
                 # not_span_value_index = span_value_truth[:, 0] == 1
@@ -193,10 +194,10 @@ class Tracker(nn.Module):
                     prediction['slots'] = []
                     predictions.append(prediction)
                     continue
-                mentioned_slot_su = su_attentin[mentioned_slot_index]  # psn*2hd
-                tiled_domain_enc = predicted_domain_enc.unsqueeze(0).repeat(mentioned_slot_num, 1)  # msn*hd
+                mentioned_slot_enc = current_slot_enc[mentioned_slot_index]  # psn*2hd
+                tiled_utt_summer_enc = utt_summer.unsqueeze(0).repeat(mentioned_slot_num, 1)  # msn*2hd
                 # msn*2
-                span_value_logits = self.span_value_scorer(torch.cat([mentioned_slot_su, tiled_domain_enc], dim=1))
+                span_value_logits = self.span_value_scorer(torch.cat([mentioned_slot_enc, tiled_utt_summer_enc], dim=1))
                 span_value_p = F.softmax(span_value_logits, dim=1)  # psn*2
                 # not_span_value_index = span_value_p.argmax(dim=1) == 0
                 span_value_index = span_value_p.argmax(dim=1) == 1
